@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>CHAT EN TIEMPO REAL</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div id="chat-container">
+        <h1>CHAT EN TIEMPO REAL</h1>
+        <ul id="mensajes"></ul>
+        <hr>
+        <input type="text" id="message-input" placeholder="Escribe tu mensaje aquí...">
+        <button id="send-button">Enviar</button>
+        <p id="escribiendo"></p>
+
+    </div>
+    <script src="/socket.io/socket.io.js"></script>
+    <script>
+        const socket = io();
+        console.log("mensaje desde el index: "+socket.id);
+
+        const messageInput = document.getElementById('message-input');
+        const sendButton = document.getElementById('send-button');
+        const messagesDiv = document.getElementById('messages');
+        const escribiendoDiv = document.getElementById('escribiendo');
+        const mensajesUl = document.getElementById('mensajes');
+
+        sendButton.addEventListener('click', () => {
+            const message = messageInput.value;
+            if (message) {
+                console.log(message);
+                socket.emit('mensaje', message);
+                messageInput.value = '';
+                escribiendoDiv.innerHTML = '';
+            }
+        });
+
+        socket.on('mensaje', (msg) => {
+            const li = document.createElement('li');
+            li.textContent = msg;
+            mensajesUl.appendChild(li);
+            window.scrollTo(0, document.body.scrollHeight);
+        });
+
+        messageInput.addEventListener('input', () => {
+            socket.emit('escribiendo', 'Un usuario');
+        });
+
+        socket.on('escribiendo', (usuario) => {
+            escribiendoDiv.textContent = usuario+'- está escribiendo...';
+            setTimeout(() => {
+                escribiendoDiv.textContent = '';
+            }, 4000);
+        });
+    </script>
+</body>
+</html>
