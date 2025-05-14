@@ -124,41 +124,44 @@ io.on('connection', async (socket) => {
             // Join the socket.io room
             socket.join(roomId);
 
-            // Get form data if it exists
-            const formBuilder = await FormBuilder.findOne({where: {id: formBuilderId}});
-            if (formBuilder) {
-                await formBuilder.updateRoomId(roomId);
-                console.log('elementos: ', formBuilder.elements);
+            // Get form data if it exists and formBuilderId is defined
+            let formBuilder = null;
+            if (formBuilderId !== undefined && formBuilderId !== null && formBuilderId !== 'undefined') {
+                formBuilder = await FormBuilder.findOne({where: {id: formBuilderId}});
+                if (formBuilder) {
+                    await formBuilder.updateRoomId(roomId);
+                    console.log('elementos: ', formBuilder.elements);
 
-                // Ensure elements is always an array
-                let elements = [];
-                if (formBuilder.elements) {
-                    if (Array.isArray(formBuilder.elements)) {
-                        elements = formBuilder.elements;
-                    } else if (typeof formBuilder.elements === 'string') {
-                        try {
-                            elements = JSON.parse(formBuilder.elements);
-                        } catch (e) {
-                            console.error('Error parsing elements JSON:', e);
+                    // Ensure elements is always an array
+                    let elements = [];
+                    if (formBuilder.elements) {
+                        if (Array.isArray(formBuilder.elements)) {
+                            elements = formBuilder.elements;
+                        } else if (typeof formBuilder.elements === 'string') {
+                            try {
+                                elements = JSON.parse(formBuilder.elements);
+                            } catch (e) {
+                                console.error('Error parsing elements JSON:', e);
+                            }
                         }
                     }
-                }
 
-                // Send elements to the client
-                socket.emit('formUpdate', {
-                    elements: elements,
-                    user: 'server',
-                    roomId
-                });
-
-                if (formBuilder.name) {
-                    socket.emit('formNameChange', {
-                        formBuilderId: formBuilder.id,
-                        userId: userId,
-                        name: formBuilder.name,
+                    // Send elements to the client
+                    socket.emit('formUpdate', {
+                        elements: elements,
                         user: 'server',
                         roomId
                     });
+
+                    if (formBuilder.name) {
+                        socket.emit('formNameChange', {
+                            formBuilderId: formBuilder.id,
+                            userId: userId,
+                            name: formBuilder.name,
+                            user: 'server',
+                            roomId
+                        });
+                    }
                 }
             }
 
