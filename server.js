@@ -6,8 +6,7 @@ const http = require('http');
 const {Server} = require('socket.io');
 const cors = require('cors');
 const { connectDB } = require('./config/database');
-const Room = require('./models/Room');
-const FormBuilder = require('./models/Form-builder');
+const Pizarra = require('./models/Pizarra');
 
 // Production dependencies
 const compression = require('compression');
@@ -96,82 +95,54 @@ io.on('connection', async (socket) => {
 
     // Handle joining a room
     socket.on('joinRoom', async (data) => {
-        const { formBuilderId, userId ,roomId, user } = data;
-        console.log(`Usuario ${user} unido a la sala ${roomId} del formBuilder ${formBuilderId}`);
-
+        const { pizarraId, userId ,roomId, userName } = data;
+        console.log(`Usuario ${userId} unido a la sala ${roomId} del pizarra ${pizarraId}`);
+        if (pizarraId !== undefined && pizarraId !== null && pizarraId !== 'undefined') return;
         try {
             // Find or create room
-            let room = await Room.findOne({ where: {room_id: roomId}});
-            if (!room) {
-                // como agregar una nueva sala
-                room = new Room({
-                    room_id: roomId,
-                    users: [user], // Convierte el array a JSON
-                    last_activity: new Date()
-                });
-                await room.save();
-            }else{
-                // Si la sala ya existe, actualiza el campo `users` correctamente
-                const currentUsers = Array.isArray(room.users) ? room.users : []; // Asegúrate de que sea un array
-                if (!currentUsers.includes(user)) {
-                    currentUsers.push(user);
-                    room.users = currentUsers; // Asigna el array actualizado
-                }
-                room.last_activity = new Date();
-                await room.save();
-            }
-
+            let pizarra = await Pizarra.findOne({ where: { id: pizarraId } });
             // Join the socket.io room
-            socket.join(roomId);
+            socket.join(pizarraId);
 
-            // Get form data if it exists and formBuilderId is defined
-            let formBuilder = null;
-            if (formBuilderId !== undefined && formBuilderId !== null && formBuilderId !== 'undefined') {
-                formBuilder = await FormBuilder.findOne({where: {id: formBuilderId}});
-                if (formBuilder) {
-                    await formBuilder.updateRoomId(roomId);
-                    console.log('elementos: ', formBuilder.elements);
-
-                    // Ensure elements is always an array
-                    let elements = [];
-                    if (formBuilder.elements) {
-                        if (Array.isArray(formBuilder.elements)) {
-                            elements = formBuilder.elements;
-                        } else if (typeof formBuilder.elements === 'string') {
-                            try {
-                                elements = JSON.parse(formBuilder.elements);
-                            } catch (e) {
-                                console.error('Error parsing elements JSON:', e);
-                            }
+            if (pizarra) {
+                // Ensure elements is always an array
+                let elements = [];
+                if (pizarra.elements) {
+                    if (Array.isArray(pizarra.elements)) {
+                        elements = pizarra.elements;
+                    } else if (typeof pizarra.elements === 'string') {
+                        try {
+                            elements = JSON.parse(pizarra.elements);
+                        } catch (e) {
+                            console.error('Error parsing elements JSON:', e);
                         }
                     }
+                }
 
-                    // Send elements to the client
-                    socket.emit('formUpdate', {
-                        elements: elements,
+                // Send elements to the client
+                socket.emit('formUpdate', {
+                    elements: elements,
+                    user: 'server',
+                    roomId
+                });
+
+                if (pizarra.name) {
+                    socket.emit('formNameChange', {
+                        pizarraId: pizarra.id,
+                        userId: userId,
+                        name: pizarra.name,
                         user: 'server',
                         roomId
                     });
-
-                    if (formBuilder.name) {
-                        socket.emit('formNameChange', {
-                            formBuilderId: formBuilder.id,
-                            userId: userId,
-                            name: formBuilder.name,
-                            user: 'server',
-                            roomId
-                        });
-                    }
                 }
             }
 
             // Notify other users in the room
-            socket.to(roomId).emit('userJoined', { user, roomId });
+            socket.to(roomId).emit('userJoined', { userName, roomId });
 
             // Send updated room users to all clients
-            const updatedRoom = await Room.findOne({where : {room_id: roomId}});
             io.to(roomId).emit('roomUsers', {
-                users: updatedRoom.users,
+                users: pizarra.users,
                 roomId
             });
         } catch (error) {
