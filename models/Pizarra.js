@@ -7,6 +7,11 @@ const Pizarra = sequelize.define('pizarras', {
         primaryKey: true,
         autoIncrement: true
     },
+    pizarra_id: {
+        type: DataTypes.INTEGER,
+        unique: false,
+        allowNull: true
+    },
     room_id:{
         type: DataTypes.STRING,
         unique: true,
@@ -22,6 +27,10 @@ const Pizarra = sequelize.define('pizarras', {
         defaultValue: ''
     },
     elements: {
+        type: DataTypes.JSONB,
+        defaultValue: []
+    },
+    screens: {
         type: DataTypes.JSONB,
         defaultValue: []
     },
@@ -50,6 +59,14 @@ Pizarra.prototype.updateElements = async function(elements) {
 // obtener elementos de la pizarra
 Pizarra.prototype.getElements = function() {
     return this.elements;
+};
+// obtener screens de la pizarra
+Pizarra.prototype.getScreens = function() {
+    return this.elements.filter(element => element.type === 'screen');
+};
+//obtener usuarios de la pizarra
+Pizarra.prototype.getUsers = function() {
+    return this.users;
 };
 // actualizar name de la pizarra
 Pizarra.prototype.updateName = async function(name) {

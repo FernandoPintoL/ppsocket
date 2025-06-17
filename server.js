@@ -5,10 +5,12 @@ const express = require('express');
 const http = require('http');
 const {Server} = require('socket.io');
 const cors = require('cors');
+const { Op } = require('sequelize');
 const { connectDB } = require('./config/database');
 const Pizarra = require('./models/Pizarra');
 const PizarraCollaborators = require('./models/PizarraCollaborators');
 const User = require('./models/User');
+const Message = require('./models/Message');
 
 // Production dependencies
 const compression = require('compression');
@@ -32,34 +34,93 @@ const corsOptions = {
   origin: CORS_ORIGIN === '*' ? '*' : CORS_ORIGIN.split(',')
 };
 
-// Initialize Socket.io with CORS options
+// Inicializar Socket.io con opciones CORS
 const io = new Server(server, {cors: corsOptions});
 
 // Apply middleware
 app.use(cors(corsOptions));
 app.use(express.json());
 
-// Add endpoint for emitting events from external sources (like PHP)
+// Agregar un punto final para emitir eventos desde fuentes externas (como PHP)
 app.post('/emit-event', (req, res) => {
     const { event, data } = req.body;
 
     if (!event || !data) {
-        return res.status(400).json({ error: 'Event and data are required' });
+        return res.status(400).json({ error: 'Se requieren el evento y los datos' });
     }
 
-    console.log(`Emitting event ${event} with data:`, data);
+    console.log(`Emitiendo evento ${event} with data:`, data);
 
-    // If roomId is provided, emit to that room, otherwise emit globally
+    // Si se proporciona roomId, se emite a esa sala; de lo contrario, se emite globalmente.
     if (data.roomId) {
         io.to(data.roomId).emit(event, data);
     } else {
         io.emit(event, data);
     }
 
-    return res.status(200).json({ success: true, message: 'Event emitted successfully' });
+    return res.status(200).json({ success: true, message: 'Evento emitido exitosamente' });
 });
 
-// Apply production middleware if in production mode
+// Endpoint to get chat history for a room
+app.get('/chat-history/:roomId', async (req, res) => {
+    try {
+        const { roomId } = req.params;
+        const limit = req.query.limit ? parseInt(req.query.limit) : 50;
+
+        const messages = await Message.getMessagesByRoom(roomId, limit);
+
+        return res.status(200).json({
+            success: true,
+            messages: messages.reverse() // Return in chronological order
+        });
+    } catch (error) {
+        console.error('Error fetching chat history:', error);
+        return res.status(500).json({
+            success: false,
+            error: 'Error fetching chat history'
+        });
+    }
+});
+
+// Endpoint to save a chat message
+app.post('/chat/message', async (req, res) => {
+    try {
+        const { pizarra_id, message, is_system_message, user_id, user_name, room_id } = req.body;
+
+        if (!pizarra_id || !message) {
+            return res.status(400).json({
+                success: false,
+                error: 'Missing required fields: pizarra_id and message are required'
+            });
+        }
+
+        // Create the message in the database
+        const newMessage = await Message.create({
+            pizarra_id: pizarra_id,
+            room_id: room_id || `room_${pizarra_id}`, // Use provided room_id or generate one
+            user_id: user_id || null,
+            user_name: user_name || 'Anonymous',
+            text: message,
+            timestamp: new Date()
+        });
+
+        console.log('Message saved to database via HTTP endpoint');
+
+        return res.status(200).json({
+            success: true,
+            message: 'Message saved successfully',
+            data: newMessage
+        });
+    } catch (error) {
+        console.error('Error saving chat message:', error);
+        return res.status(500).json({
+            success: false,
+            error: 'Error saving chat message'
+        });
+    }
+});
+
+// Aplicar middleware de producción si está en modo de producción
 if (NODE_ENV === 'production') {
   // Enable compression
   app.use(compression());
@@ -95,17 +156,18 @@ if (NODE_ENV === 'production') {
 io.on('connection', async (socket) => {
     console.log('Nuevo cliente conectado', socket.id);
 
-    // Handle joining a room
+    // Manejar unirse a una habitación
     socket.on('joinRoom', async (data) => {
         const { pizarraId, userId, roomId, userName } = data;
-        console.log(`Usuario ${userId} unido a la sala ${roomId} del pizarra ${pizarraId}`);
+        console.log(`UserId : ${userId}, UserName: ${userName} se unirá a la, sala: ${roomId}, del pizarra: ${pizarraId}`);
         if (pizarraId === undefined || pizarraId === null || pizarraId === 'undefined') return;
         try {
-            // Find or create room
+            // Buscar o crear habitación
             let pizarra = await Pizarra.findOne({ where: { id: pizarraId } });
+            console.log('Pizarra encontrada:', pizarra ? 'sí' : 'no');
 
-            // If pizarra doesn't exist, create it
-            if (!pizarra) {
+            // Si pizarra no existe, créala
+            if (!pizarra && Number.isInteger(pizarraId) && pizarraId > 0) {
                 pizarra = await Pizarra.create({
                     id: pizarraId,
                     room_id: roomId,
@@ -115,32 +177,30 @@ io.on('connection', async (socket) => {
                     users: []
                 });
             }
-
-            // Join the socket.io room
+            // Únete a la sala socket.io
             socket.join(roomId);
-
-            // Get user information
-            const user = await User.findOne({ where: { id: userId } });
-
-            // Add user to collaborators if not already a collaborator
-            const collaborator = await PizarraCollaborators.findOne({
-                where: {
-                    pizarra_id: pizarraId,
-                    user_id: userId
-                }
-            });
-
-            if (!collaborator && user) {
+            // get the user from the database
+            let user;
+            if(Number.isInteger(userId) && pizarraId > 0){
+                user = await User.findOne({ where: { id: userId } });
+            }else{
+                user = await User.findOne({ where: { name: userName } });
+            }
+            console.log('Usuario encontrado:', user ? 'yes' : 'no');
+            // Agregar usuario a colaboradores si aún no es colaborador
+            const collaborator = await PizarraCollaborators.findOne({ where: { pizarra_id: pizarraId} });
+            console.log('Colaborador encontrado:', collaborator ? 'yes' : 'no');
+            // Si el usuario no es colaborador, crear un nuevo registro de colaborador
+            if (!collaborator && user && Number.isInteger(userId) && pizarraId > 0) {
                 await PizarraCollaborators.create({
                     pizarra_id: pizarraId,
                     user_id: userId,
                     status: 'active'
                 });
             }
-
-            // Add user to the pizarra's users array if not already present
+            // Agregar usuario a la matriz de usuarios de pizarra si aún no está presente
             if (pizarra.users && Array.isArray(pizarra.users)) {
-                const userExists = pizarra.users.some(u => u.id === userId);
+                const userExists = pizarra.users.some(u => u.id === userId || u.name === userName);
                 if (!userExists && user) {
                     pizarra.users.push({
                         id: userId,
@@ -150,7 +210,7 @@ io.on('connection', async (socket) => {
                     await pizarra.save();
                 }
             } else {
-                // Initialize users array if it doesn't exist
+                // Inicializar la matriz de usuarios si no existe
                 if (user) {
                     pizarra.users = [{
                         id: userId,
@@ -160,8 +220,7 @@ io.on('connection', async (socket) => {
                     await pizarra.save();
                 }
             }
-
-            // Ensure elements is always an array
+            // Asegúrese de que los elementos sean siempre una matriz
             let elements = [];
             if (pizarra.elements) {
                 if (Array.isArray(pizarra.elements)) {
@@ -174,14 +233,12 @@ io.on('connection', async (socket) => {
                     }
                 }
             }
-
-            // Send elements to the client
+            // Enviar elementos al cliente
             socket.emit('formUpdate', {
                 elements: elements,
                 user: 'server',
                 roomId
             });
-
             if (pizarra.name) {
                 socket.emit('formNameChange', {
                     pizarraId: pizarra.id,
@@ -191,25 +248,40 @@ io.on('connection', async (socket) => {
                     roomId
                 });
             }
-
-            // Notify other users in the room
+            // Notificar a otros usuarios en la sala
             socket.to(roomId).emit('userJoined', { userName, roomId });
 
-            // Send updated room users to all clients
+            // Enviar usuarios actualizados a todos los clientes.
             io.to(roomId).emit('roomUsers', {
                 users: pizarra.users,
                 roomId
             });
+            // Enviar lista de colaboradores al cliente
+            const collaborators = await PizarraCollaborators.findAll({ where: { pizarra_id: pizarraId }});
+            const userIds = collaborators.map(collaborator => collaborator.user_id);
 
-            // Send collaborator list to the client
-            const collaborators = await PizarraCollaborators.findAll({
-                where: { pizarra_id: pizarraId }
-            });
+            const users = await User.findAll({ where: { id: userIds } });
+
+            console.log('Lista de usuarios:', users);
 
             socket.emit('collaboratorList', {
                 pizarraId,
-                collaborators
+                collaborators,
+                users
             });
+
+            // Fetch and send chat message history
+            try {
+                const messages = await Message.getMessagesByRoom(roomId);
+                if (messages && messages.length > 0) {
+                    socket.emit('chatHistory', {
+                        messages: messages.reverse(), // Send in chronological order
+                        roomId
+                    });
+                }
+            } catch (error) {
+                console.error('Error fetching chat history:', error);
+            }
         } catch (error) {
             console.error('Error al unirse a la sala:', error);
             socket.emit('error', { message: 'Error joining room' });
@@ -322,19 +394,35 @@ io.on('connection', async (socket) => {
 
     // Handle chat messages
     socket.on('chatMessage', async (data) => {
-        const { text, user, timestamp, roomId } = data;
+        const { text, user, timestamp, roomId, pizarraId, userId } = data;
         console.log(`Mensaje de chat en la sala ${roomId} por el usuario ${user}: ${text}`);
 
         try {
+            // Store the message in the database
+            if (pizarraId) {
+                await Message.create({
+                    pizarra_id: pizarraId,
+                    room_id: roomId,
+                    user_id: userId || null,
+                    user_name: user,
+                    text: text,
+                    timestamp: timestamp || new Date()
+                });
+                console.log('Message saved to database');
+            } else {
+                console.log('No pizarraId provided, message not saved to database');
+            }
+
             // Broadcast the message to all other users in the room
-            socket.to(roomId).emit('chatMessage', { text, user, timestamp, roomId });
+            socket.to(roomId).emit('chatMessage', { text, user, timestamp, roomId, pizarraId, userId });
         } catch (error) {
             console.error('Error in chatMessage:', error);
             socket.emit('error', { message: 'Error sending chat message' });
         }
     });
 
-    // Handle typing indicator for chat
+    // Handle typing indicator for chat (Spanish: 'escribiendo' = 'typing')
+    // This event is kept in Spanish for compatibility with the frontend
     socket.on('escribiendo', (data) => {
         const { user, roomId } = data;
         console.log(`Usuario ${user} está escribiendo en la sala ${roomId}`);
@@ -350,6 +438,42 @@ io.on('connection', async (socket) => {
 
         // Broadcast typing indicator to all other users in the room
         socket.to(roomId).emit('typing', { user, roomId });
+    });
+
+    // Handle Flutter widget added event
+    socket.on('flutter-widget-added', (data) => {
+        const { roomId, widget, userId, screenId } = data;
+        console.log(`Widget added in room ${roomId} by user ${userId}`);
+
+        // Broadcast the widget added event to all other users in the room
+        socket.to(roomId).emit('flutter-widget-added', { roomId, widget, userId, screenId });
+    });
+
+    // Handle Flutter widget updated event
+    socket.on('flutter-widget-updated', (data) => {
+        const { roomId, widget, userId, screenId } = data;
+        console.log(`Widget updated in room ${roomId} by user ${userId}`);
+
+        // Broadcast the widget updated event to all other users in the room
+        socket.to(roomId).emit('flutter-widget-updated', { roomId, widget, userId, screenId });
+    });
+
+    // Handle Flutter widget removed event
+    socket.on('flutter-widget-removed', (data) => {
+        const { roomId, widgetIndex, userId, screenId } = data;
+        console.log(`Widget removed in room ${roomId} by user ${userId}`);
+
+        // Broadcast the widget removed event to all other users in the room
+        socket.to(roomId).emit('flutter-widget-removed', { roomId, widgetIndex, userId, screenId });
+    });
+
+    // Handle Flutter widget selected event
+    socket.on('flutter-widget-selected', (data) => {
+        const { roomId, widget, userId, screenId } = data;
+        console.log(`Widget selected in room ${roomId} by user ${userId}`);
+
+        // Broadcast the widget selected event to all other users in the room
+        socket.to(roomId).emit('flutter-widget-selected', { roomId, widget, userId, screenId });
     });
 
     // Handle collaborator management
