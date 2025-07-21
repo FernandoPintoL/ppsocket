@@ -66,6 +66,7 @@ app.get('/chat-history/:roomId', async (req, res) => {
     try {
         const { roomId } = req.params;
         const limit = req.query.limit ? parseInt(req.query.limit) : 50;
+        console.log(`Fetching chat history for room: ${roomId} with limit: ${limit}`);
 
         const messages = await Message.getMessagesByRoom(roomId, limit);
 
@@ -394,8 +395,8 @@ io.on('connection', async (socket) => {
 
     // Handle chat messages
     socket.on('chatMessage', async (data) => {
-        const { text, user, timestamp, roomId, pizarraId, userId } = data;
-        console.log(`Mensaje de chat en la sala ${roomId} por el usuario ${user}: ${text}`);
+        const { message, user, timestamp, roomId, pizarraId, userId } = data;
+        console.log(`Mensaje de chat en la roomId: ${roomId} / pizarraId: ${pizarraId} por el userID: ${userId}  usuario ${user}: ${message}`);
 
         try {
             // Store the message in the database
@@ -405,7 +406,7 @@ io.on('connection', async (socket) => {
                     room_id: roomId,
                     user_id: userId || null,
                     user_name: user,
-                    text: text,
+                    text: message,
                     timestamp: timestamp || new Date()
                 });
                 console.log('Message saved to database');
@@ -414,7 +415,7 @@ io.on('connection', async (socket) => {
             }
 
             // Broadcast the message to all other users in the room
-            socket.to(roomId).emit('chatMessage', { text, user, timestamp, roomId, pizarraId, userId });
+            socket.to(roomId).emit('chatMessage', { message, user, timestamp, roomId, pizarraId, userId });
         } catch (error) {
             console.error('Error in chatMessage:', error);
             socket.emit('error', { message: 'Error sending chat message' });
@@ -478,12 +479,36 @@ io.on('connection', async (socket) => {
 
     // Handle collaborator management
     socket.on('manageCollaborator', async (data) => {
-        const { action, pizarraId, userId, status, roomId } = data;
-        console.log(`Acción de colaborador: ${action} para pizarra ${pizarraId}, usuario ${userId}, estado ${status}`);
+        const { action, pizarraId, userEmail, status, roomId } = data;
+        console.log(`Acción de colaborador: ${action} para pizarra ${pizarraId}, usuarioEmail ${userEmail}, estado ${status}`);
 
         try {
             // Find the pizarra
             const pizarra = await Pizarra.findOne({ where: { id: pizarraId } });
+            const user = await User.findOne({ where: { email: userEmail } });
+            console.log('user :', user ? 'yes' : 'no');
+             // verificar si el usuario es propietario de la pizarra o ya es colaborador
+            const userId = user ? user.id : null;
+            if (!userId) {
+                console.log('User not found, cannot manage collaborator');
+                socket.emit('error', { message: 'User not found' });
+                return;
+            }
+            // Verificar si el usuario es el propietario de la pizarra
+            if (pizarra && pizarra.user_id === userId) {
+                console.log('El usuario es el propietario de la pizarra, no puede ser agregado como colaborador');
+                socket.emit('error', { message: 'El usuario es el propietario de la pizarra y no puede ser agregado como colaborador' });
+                return;
+            }
+            // Verificar si el usuario ya es colaborador
+            const existingCollaborator = await PizarraCollaborators.findOne({ where: { pizarra_id: pizarraId, user_id: userId } });
+            if (existingCollaborator) {
+                console.log('El usuario ya es colaborador de la pizarra');
+                socket.emit('error', { message: 'El usuario ya es colaborador de la pizarra' });
+                return;
+            }
+            console.log('Pizarra found:', pizarra ? 'yes' : 'no');
+            // If pizarra not found, return an error
 
             if (!pizarra) {
                 console.log('Pizarra not found, cannot manage collaborator');

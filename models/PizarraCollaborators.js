@@ -19,6 +19,14 @@ const PizarraCollaborators = sequelize.define('pizarra_collaborators', {
         type: DataTypes.STRING,
         defaultValue: ''
     },
+    created_at: {
+        type: DataTypes.DATE,
+        defaultValue: DataTypes.NOW
+    },
+    updated_at: {
+        type: DataTypes.DATE,
+        defaultValue: DataTypes.NOW
+    }
 },{
     tableName: 'pizarra_collaborators',
     timestamps: true,

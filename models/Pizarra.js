@@ -7,24 +7,23 @@ const Pizarra = sequelize.define('pizarras', {
         primaryKey: true,
         autoIncrement: true
     },
-    pizarra_id: {
-        type: DataTypes.INTEGER,
-        unique: false,
-        allowNull: true
-    },
     room_id:{
         type: DataTypes.STRING,
         unique: true,
         allowNull: true
     },
-    user_id: {
-        type: DataTypes.INTEGER,
-        unique: true,
-        allowNull: false
-    },
     name: {
         type: DataTypes.STRING,
         defaultValue: ''
+    },
+    users:{
+        type: DataTypes.JSONB,
+        defaultValue: []
+    },
+    isHome:{
+        type: DataTypes.BOOLEAN,
+        defaultValue: false,
+        field: 'isHome'
     },
     elements: {
         type: DataTypes.JSONB,
@@ -34,9 +33,27 @@ const Pizarra = sequelize.define('pizarras', {
         type: DataTypes.JSONB,
         defaultValue: []
     },
-    users:{
-        type: DataTypes.JSONB,
-        defaultValue: []
+    type: {
+        type: DataTypes.STRING,
+        defaultValue: 'unified'
+    },
+    framework: {
+        type: DataTypes.STRING,
+        defaultValue: 'flutter'
+    },
+    description: {
+        type: DataTypes.STRING,
+        defaultValue: ''
+    },
+    pizarra_id: {
+        type: DataTypes.INTEGER,
+        unique: false,
+        allowNull: true
+    },
+    user_id: {
+        type: DataTypes.INTEGER,
+        unique: true,
+        allowNull: false
     },
     created_at: {
         type: DataTypes.DATE,
@@ -59,14 +76,6 @@ Pizarra.prototype.updateElements = async function(elements) {
 // obtener elementos de la pizarra
 Pizarra.prototype.getElements = function() {
     return this.elements;
-};
-// obtener screens de la pizarra
-Pizarra.prototype.getScreens = function() {
-    return this.elements.filter(element => element.type === 'screen');
-};
-//obtener usuarios de la pizarra
-Pizarra.prototype.getUsers = function() {
-    return this.users;
 };
 // actualizar name de la pizarra
 Pizarra.prototype.updateName = async function(name) {
