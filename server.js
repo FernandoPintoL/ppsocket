@@ -68,7 +68,21 @@ app.get('/chat-history/:roomId', async (req, res) => {
         const limit = req.query.limit ? parseInt(req.query.limit) : 50;
         console.log(`Fetching chat history for room: ${roomId} with limit: ${limit}`);
 
-        const messages = await Message.getMessagesByRoom(roomId, limit);
+        const dbMessages = await Message.getMessagesByRoom(roomId, limit);
+        
+        // Transform messages to include both sets of field names for compatibility
+        const messages = dbMessages.map(msg => {
+            // Convert Sequelize model to plain object if needed
+            const message = msg.toJSON ? msg.toJSON() : msg;
+            
+            return {
+                ...message,
+                // Add compatibility fields
+                message: message.text,
+                user: message.user_name,
+                created_at: message.timestamp
+            };
+        });
 
         return res.status(200).json({
             success: true,
@@ -157,6 +171,18 @@ if (NODE_ENV === 'production') {
 io.on('connection', async (socket) => {
     console.log('Nuevo cliente conectado', socket.id);
 
+    // En el servidor
+    socket.on('ping', (data) => {
+        console.log('Ping recibido de cliente:', data);
+        socket.emit('pong', {
+            message: 'Conexión establecida correctamente',
+            userId: data.userId,
+            roomId: data.roomId,
+            timestamp: new Date().toISOString()
+        });
+    });
+
+
     // Manejar unirse a una habitación
     socket.on('joinRoom', async (data) => {
         const { pizarraId, userId, roomId, userName } = data;
@@ -173,7 +199,7 @@ io.on('connection', async (socket) => {
                     id: pizarraId,
                     room_id: roomId,
                     user_id: userId,
-                    name: 'New Pizarra',
+                    name: 'Nueva Pizarra Socket',
                     elements: [],
                     users: []
                 });
@@ -414,8 +440,20 @@ io.on('connection', async (socket) => {
                 console.log('No pizarraId provided, message not saved to database');
             }
 
+            // Create a consistent message object that matches the database structure
+            const messageObject = {
+                pizarra_id: pizarraId,
+                room_id: roomId,
+                user_id: userId || null,
+                user_name: user,
+                message: message, // Keep message for backward compatibility
+                text: message,
+                timestamp: timestamp || new Date(),
+                created_at: timestamp || new Date()
+            };
+            
             // Broadcast the message to all other users in the room
-            socket.to(roomId).emit('chatMessage', { message, user, timestamp, roomId, pizarraId, userId });
+            io.to(roomId).emit('chatMessage', messageObject);
         } catch (error) {
             console.error('Error in chatMessage:', error);
             socket.emit('error', { message: 'Error sending chat message' });
@@ -429,7 +467,7 @@ io.on('connection', async (socket) => {
         console.log(`Usuario ${user} está escribiendo en la sala ${roomId}`);
 
         // Broadcast typing indicator to all other users in the room
-        socket.to(roomId).emit('escribiendo', { user, roomId });
+        io.to(roomId).emit('escribiendo', { user, roomId });
     });
 
     // Handle typing indicator for form element editing
@@ -438,7 +476,7 @@ io.on('connection', async (socket) => {
         console.log(`Usuario ${user} está editando un elemento en la sala ${roomId}`);
 
         // Broadcast typing indicator to all other users in the room
-        socket.to(roomId).emit('typing', { user, roomId });
+        io.to(data.roomId).emit('typing', { user, roomId });
     });
 
     // Handle Flutter widget added event
@@ -448,6 +486,32 @@ io.on('connection', async (socket) => {
 
         // Broadcast the widget added event to all other users in the room
         socket.to(roomId).emit('flutter-widget-added', { roomId, widget, userId, screenId });
+        
+        // Also emit the unified element event for compatibility
+        socket.to(roomId).emit('unified-element-added', { 
+            roomId, 
+            element: widget, 
+            userId, 
+            screenId,
+            timestamp: new Date().toISOString()
+        });
+    });
+
+    // Handle unified element added event
+    socket.on('unified-element-added', (data) => {
+        const { roomId, element, userId, screenId } = data;
+        console.log(`Unified element added in room ${roomId} by user ${userId}`);
+
+        // Broadcast the unified element added event to all other users in the room
+        socket.to(roomId).emit('unified-element-added', { roomId, element, userId, screenId });
+        
+        // Also emit the flutter widget event for backward compatibility
+        socket.to(roomId).emit('flutter-widget-added', { 
+            roomId, 
+            widget: element, 
+            userId, 
+            screenId 
+        });
     });
 
     // Handle Flutter widget updated event
@@ -457,6 +521,32 @@ io.on('connection', async (socket) => {
 
         // Broadcast the widget updated event to all other users in the room
         socket.to(roomId).emit('flutter-widget-updated', { roomId, widget, userId, screenId });
+        
+        // Also emit the unified element event for compatibility
+        socket.to(roomId).emit('unified-element-updated', { 
+            roomId, 
+            element: widget, 
+            userId, 
+            screenId,
+            timestamp: new Date().toISOString()
+        });
+    });
+
+    // Handle unified element updated event
+    socket.on('unified-element-updated', (data) => {
+        const { roomId, element, userId, screenId } = data;
+        console.log(`Unified element updated in room ${roomId} by user ${userId}`);
+
+        // Broadcast the unified element updated event to all other users in the room
+        socket.to(roomId).emit('unified-element-updated', { roomId, element, userId, screenId });
+        
+        // Also emit the flutter widget event for backward compatibility
+        socket.to(roomId).emit('flutter-widget-updated', { 
+            roomId, 
+            widget: element, 
+            userId, 
+            screenId 
+        });
     });
 
     // Handle Flutter widget removed event
@@ -466,6 +556,32 @@ io.on('connection', async (socket) => {
 
         // Broadcast the widget removed event to all other users in the room
         socket.to(roomId).emit('flutter-widget-removed', { roomId, widgetIndex, userId, screenId });
+        
+        // Also emit the unified element event for compatibility
+        socket.to(roomId).emit('unified-element-deleted', { 
+            roomId, 
+            elementId: widgetIndex, 
+            userId, 
+            screenId,
+            timestamp: new Date().toISOString()
+        });
+    });
+
+    // Handle unified element deleted event
+    socket.on('unified-element-deleted', (data) => {
+        const { roomId, elementId, userId, screenId } = data;
+        console.log(`Unified element deleted in room ${roomId} by user ${userId}`);
+
+        // Broadcast the unified element deleted event to all other users in the room
+        socket.to(roomId).emit('unified-element-deleted', { roomId, elementId, userId, screenId });
+        
+        // Also emit the flutter widget event for backward compatibility
+        socket.to(roomId).emit('flutter-widget-removed', { 
+            roomId, 
+            widgetIndex: elementId, 
+            userId, 
+            screenId 
+        });
     });
 
     // Handle Flutter widget selected event
@@ -475,6 +591,32 @@ io.on('connection', async (socket) => {
 
         // Broadcast the widget selected event to all other users in the room
         socket.to(roomId).emit('flutter-widget-selected', { roomId, widget, userId, screenId });
+        
+        // Also emit the unified element event for compatibility
+        socket.to(roomId).emit('unified-element-selected', { 
+            roomId, 
+            element: widget, 
+            userId, 
+            screenId,
+            timestamp: new Date().toISOString()
+        });
+    });
+
+    // Handle unified element selected event
+    socket.on('unified-element-selected', (data) => {
+        const { roomId, element, userId, screenId } = data;
+        console.log(`Unified element selected in room ${roomId} by user ${userId}`);
+
+        // Broadcast the unified element selected event to all other users in the room
+        socket.to(roomId).emit('unified-element-selected', { roomId, element, userId, screenId });
+        
+        // Also emit the flutter widget event for backward compatibility
+        socket.to(roomId).emit('flutter-widget-selected', { 
+            roomId, 
+            widget: element, 
+            userId, 
+            screenId 
+        });
     });
 
     // Handle collaborator management
